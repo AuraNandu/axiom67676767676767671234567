@@ -9,15 +9,15 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Simple health check for Fly.io
+// Health check for Fly.io
 app.get('/health', (req, res) => {
   res.status(200).send('ok');
 });
 
-// In-memory store (resets when server restarts)
-const users = {};          // username -> { password, socketId }
-const friends = {};        // username -> Set of friend usernames
-const messages = {};       // "user1::user2" -> array of {from, text, time}
+// In-memory store
+const users = {};
+const friends = {};
+const messages = {};
 
 function chatKey(a, b) {
   return [a, b].sort().join('::');
@@ -47,7 +47,6 @@ io.on('connection', (socket) => {
     if (!u || u.password !== hash(password)) {
       return cb({ ok: false, error: 'Invalid username or password' });
     }
-    // Kick previous session if any
     if (u.socketId && u.socketId !== socket.id) {
       io.to(u.socketId).emit('kicked');
     }
@@ -58,7 +57,6 @@ io.on('connection', (socket) => {
     const friendList = Array.from(friends[username] || []);
     cb({ ok: true, username, friends: friendList });
 
-    // Notify friends this user is online
     friendList.forEach(f => {
       if (users[f]?.socketId) {
         io.to(users[f].socketId).emit('friend-online', username);
@@ -79,7 +77,6 @@ io.on('connection', (socket) => {
 
     cb({ ok: true, friends: Array.from(friends[me]) });
 
-    // Notify the other person if online
     if (users[friendName]?.socketId) {
       io.to(users[friendName].socketId).emit('friend-added', me);
     }
@@ -102,14 +99,13 @@ io.on('connection', (socket) => {
     const msg = { from: me, text: String(text).slice(0, 500), time: Date.now() };
     messages[key].push(msg);
 
-    // Send to both
     io.to(me).emit('new-message', { with: to, msg });
     if (users[to]?.socketId) {
       io.to(to).emit('new-message', { with: me, msg });
     }
   });
 
-  // ---- WebRTC signaling ----
+  // WebRTC signaling
   socket.on('call-request', ({ to, type }) => {
     const me = socket.username;
     if (!me || !to || !users[to]?.socketId) return;
@@ -156,7 +152,6 @@ io.on('connection', (socket) => {
     const me = socket.username;
     if (me && users[me]) {
       users[me].socketId = null;
-      // Notify friends offline
       (friends[me] || []).forEach(f => {
         if (users[f]?.socketId) {
           io.to(users[f].socketId).emit('friend-offline', me);
